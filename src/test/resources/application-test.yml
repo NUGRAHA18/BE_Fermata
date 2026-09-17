@@ -1,0 +1,61 @@
+# Integration-test profile. The datasource is supplied by Testcontainers via @ServiceConnection.
+app:
+  mode: DEVELOPMENT
+
+  bootstrap:
+    enabled: true
+    operator-username: test-operator
+    operator-password: test-operator-password
+    operator-full-name: Integration Test Operator
+
+  security:
+    jwt:
+      secret: integration-test-secret-key-at-least-32-characters
+      issuer: smartmelon-test
+      access-token-ttl: 10m
+    cors:
+      allowed-origins: http://localhost:3000
+
+  websocket:
+    endpoint: /ws
+    allowed-origins: http://localhost:3000
+    require-authentication: true
+
+  device:
+    offline-timeout: 120s
+    # Effectively disabled: the scheduler must not interfere with assertions.
+    liveness-check-interval: 1h
+    auto-register: true
+
+  telemetry:
+    auto-register-sensors: true
+    max-clock-skew: 300s
+    max-metrics-per-message: 64
+
+  mqtt:
+    # The loopback transport, so the tests need no broker.
+    enabled: false
+    topics:
+      telemetry: smartmelon/{deviceId}/telemetry
+      status: smartmelon/{deviceId}/status
+      command: smartmelon/{deviceId}/command
+      command-ack: smartmelon/{deviceId}/command/ack
+      ai: smartmelon/{deviceId}/ai
+      alert: smartmelon/{deviceId}/alert
+
+  catalog:
+    # The tests create their own fixtures; the hardware catalog would make counts depend on it.
+    enabled: false
+
+spring:
+  jpa:
+    hibernate:
+      # Verifies that the Flyway schema and the JPA entities actually agree.
+      ddl-auto: validate
+  flyway:
+    enabled: true
+
+logging:
+  level:
+    com.smartmelon.backend: INFO
+    org.hibernate.SQL: WARN

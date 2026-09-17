@@ -1,0 +1,11 @@
+target/
+.git/
+.github/
+.idea/
+.env
+.env.*
+!.env.example
+docs/
+*.md
+docker/mosquitto/data/
+docker/mosquitto/log/

@@ -1,0 +1,77 @@
+# Local development stack: PostgreSQL, an MQTT broker and the backend.
+#
+# The backend can also run entirely without this stack - set MQTT_ENABLED=false and point
+# DATABASE_URL at any PostgreSQL instance, including Supabase.
+#
+#   cp .env.example .env     # then fill in JWT_SECRET
+#   docker compose up --build
+#
+# Values come from .env; nothing secret is written in this file.
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: smartmelon-postgres
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-smartmelon}
+      POSTGRES_USER: ${DATABASE_USERNAME:-smartmelon}
+      POSTGRES_PASSWORD: ${DATABASE_PASSWORD:-smartmelon}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DATABASE_USERNAME:-smartmelon} -d ${POSTGRES_DB:-smartmelon}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  mosquitto:
+    image: eclipse-mosquitto:2
+    container_name: smartmelon-mosquitto
+    ports:
+      - "${MQTT_PORT:-1883}:1883"
+    volumes:
+      - ./docker/mosquitto/config/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
+      - mosquitto-data:/mosquitto/data
+      - mosquitto-log:/mosquitto/log
+
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: smartmelon-backend
+    depends_on:
+      postgres:
+        condition: service_healthy
+      mosquitto:
+        condition: service_started
+    ports:
+      - "${SERVER_PORT:-8080}:8080"
+    environment:
+      SPRING_PROFILES_ACTIVE: ${SPRING_PROFILES_ACTIVE:-dev}
+
+      DATABASE_URL: jdbc:postgresql://postgres:5432/${POSTGRES_DB:-smartmelon}
+      DATABASE_USERNAME: ${DATABASE_USERNAME:-smartmelon}
+      DATABASE_PASSWORD: ${DATABASE_PASSWORD:-smartmelon}
+
+      # Required. There is no default; set it in .env.
+      JWT_SECRET: ${JWT_SECRET}
+      JWT_ISSUER: ${JWT_ISSUER:-smartmelon-backend}
+
+      FRONTEND_URL: ${FRONTEND_URL:-http://localhost:3000}
+      WEBSOCKET_ALLOWED_ORIGINS: ${WEBSOCKET_ALLOWED_ORIGINS:-http://localhost:3000}
+
+      # Set MQTT_ENABLED=true in .env to exercise the real broker instead of the loopback transport.
+      MQTT_ENABLED: ${MQTT_ENABLED:-true}
+      MQTT_BROKER_URL: tcp://mosquitto:1883
+      MQTT_USERNAME: ${MQTT_USERNAME:-}
+      MQTT_PASSWORD: ${MQTT_PASSWORD:-}
+
+      BOOTSTRAP_OPERATOR_USERNAME: ${BOOTSTRAP_OPERATOR_USERNAME:-operator}
+      BOOTSTRAP_OPERATOR_PASSWORD: ${BOOTSTRAP_OPERATOR_PASSWORD:-change-me}
+
+volumes:
+  postgres-data:
+  mosquitto-data:
+  mosquitto-log:

@@ -1,0 +1,33 @@
+# Build output
+target/
+!.mvn/wrapper/maven-wrapper.jar
+
+# Secrets - never commit these. Use .env.example as the template.
+.env
+.env.*
+!.env.example
+
+# IDE
+.idea/
+*.iml
+*.ipr
+*.iws
+.vscode/
+.settings/
+.project
+.classpath
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs and local data
+*.log
+logs/
+docker/mosquitto/data/
+docker/mosquitto/log/
+
+#prompt
+/Master-prompt.txt
+
+/docs

@@ -1,0 +1,217 @@
+# FERTIMATA Rev A - hardware catalog and interlock policy.
+#
+# Source: docs/Arsitektur-Sistem.md (17 September 2026). Adjustment report: docs/hasil-penyesuaian-1.md.
+#
+# This file is the ONLY place the backend learns about this hardware revision. A different revision,
+# or a correction after the parts arrive, is an edit here (or a copy pointed to by
+# HARDWARE_CATALOG_LOCATION) - never a Java change.
+#
+# What this file is NOT: the wiring map. Modbus addresses, relay channels and GPIO pins under
+# `metadata` are informational copies for the operator console. The edge agent on the Jetson keeps
+# the authoritative address map (Arsitektur-Sistem.md §3: "Peta alamat di satu berkas konfigurasi").
+#
+# Device codes follow fault domains, so the console can tell "the remote I/O cable is cut" apart from
+# "the Jetson is down": each device goes OFFLINE on its own when the edge agent stops hearing from it.
+#
+# Sync is create-only: rows that already exist are never changed by a restart. Edit them through the
+# API (PATCH /api/sensors/{id}, PATCH /api/actuators/{id}) instead.
+
+app:
+  catalog:
+    name: FERTIMATA Rev A
+
+    devices:
+      # ---------------------------------------------------------------------------------------------
+      - code: JETSON-01
+        name: Jetson Orin Nano (otak sistem)
+        type: EDGE_GATEWAY
+        description: Satu-satunya komputer. Menjalankan frontend, backend, database, inferensi dan edge agent.
+        metadata:
+          location: Panel box, luar greenhouse sisi selatan
+          os: JetPack 6 / Ubuntu 22.04
+          reports: GPIO trolley (reed, limit), suhu SoC, sumber daya situs
+        sensors:
+          - code: TROLLEY-STATION
+            metric-key: trolley.station
+            name: Posisi trolley (stasiun)
+            type: POSITION
+            description: Nomor stasiun terakhir dari hitungan magnet reed; 0 = HOME.
+            metadata:
+              source: GPIO reed switch
+          - code: TROLLEY-HOME
+            metric-key: trolley.home_limit
+            name: Limit HOME trolley
+            type: LIMIT_SWITCH
+            metadata:
+              source: GPIO kontak kering + filter RC
+          - code: TROLLEY-END
+            metric-key: trolley.end_limit
+            name: Limit END trolley
+            type: LIMIT_SWITCH
+            metadata:
+              source: GPIO kontak kering + filter RC
+          - code: JETSON-SOC-TEMP
+            metric-key: jetson.soc_temperature
+            name: Suhu SoC Jetson
+            type: TEMPERATURE
+            unit: C
+            description: Indikator termal panel; Jetson hanya aman pada suhu lingkungan 0-35 C.
+
+      # ---------------------------------------------------------------------------------------------
+      - code: PZEM-01
+        name: PZEM-016 (PLN & arus pompa)
+        type: POWER_METER
+        description: Port USB sendiri (/dev/pzem), terpisah dari bus RS485 lapangan. Tidak menjawab = PLN padam.
+        metadata:
+          port: /dev/pzem
+          modbusAddress: "1"
+          ct: Kabel L pompa distribusi
+        sensors:
+          - code: MAINS-VOLTAGE
+            metric-key: mains.voltage
+            name: Tegangan PLN
+            type: VOLTAGE
+            unit: V
+          - code: MAINS-FREQUENCY
+            metric-key: mains.frequency
+            name: Frekuensi PLN
+            type: FREQUENCY
+            unit: Hz
+          - code: PUMP-CURRENT
+            metric-key: pump.current
+            name: Arus pompa distribusi
+            type: CURRENT
+            unit: A
+            description: Arus > 0 saat R0 OFF menandakan SSR rusak short.
+          - code: PUMP-POWER
+            metric-key: pump.power
+            name: Daya pompa distribusi
+            type: POWER
+            unit: W
+          - code: PUMP-ENERGY
+            metric-key: pump.energy
+            name: Energi pompa distribusi
+            type: ENERGY
+            unit: kWh
+          - code: PUMP-POWER-FACTOR
+            metric-key: pump.power_factor
+            name: Faktor daya pompa
+            type: POWER_FACTOR
+
+      # ---------------------------------------------------------------------------------------------
+      - code: PANEL-01
+        name: Relay Modbus panel (alamat 20)
+        type: MODBUS_IO
+        description: Relay 8-ch di panel box.
+        metadata:
+          bus: RS485 /dev/rs485 9600 8N1
+          modbusAddress: "20"
+        actuators:
+          - code: DIST-PUMP
+            name: Pompa distribusi 220 V
+            type: DISTRIBUTION_PUMP
+            description: Lewat SSR-40DA. Timer relay mekanis seri tetap wajib (§11).
+            metadata:
+              modbusAddress: "20"
+              channel: R0
+              load: SSR-40DA -> Panasonic GP-129JXK-P2
+          - code: LED-ILLUMINATION
+            name: LED iluminasi 24 V
+            type: ILLUMINATION
+            metadata:
+              modbusAddress: "20"
+              channel: R1
+          - code: TROLLEY-RUN
+            name: Motor trolley (jalan)
+            type: TROLLEY_MOTOR
+            description: Lintasan penuh 7,2 m pada 0,1 m/s kira-kira 72 detik.
+            # 72 s full traverse (§9) plus margin. Adjust after the rail is installed.
+            max-run-seconds: 120
+            metadata:
+              modbusAddress: "20"
+              channel: R2
+          - code: TROLLEY-DIR
+            name: Motor trolley (arah)
+            type: TROLLEY_DIRECTION
+            description: Relay DPDT. Jangan dibalik saat motor berjalan - diurutkan oleh edge agent.
+            metadata:
+              modbusAddress: "20"
+              channel: R3
+
+      # ---------------------------------------------------------------------------------------------
+      - code: GREENHOUSE-01
+        name: Sensor greenhouse (alamat 1-4)
+        type: MODBUS_SENSOR_GROUP
+        description: Sensor tanah plot A/B, udara dan cahaya pada bus RS485 daisy chain.
+        metadata:
+          bus: RS485 /dev/rs485 9600 8N1
+        sensors:
+          # Soil 7-in-1, plot A (address 1). Units follow the common datasheet; verify on arrival.
+          - { code: SOIL-A-MOISTURE, metric-key: soil_a.moisture, name: Kelembapan tanah plot A, type: SOIL_MOISTURE, unit: "%", metadata: { modbusAddress: "1" } }
+          - { code: SOIL-A-TEMP, metric-key: soil_a.temperature, name: Suhu tanah plot A, type: SOIL_TEMPERATURE, unit: C, metadata: { modbusAddress: "1" } }
+          - { code: SOIL-A-EC, metric-key: soil_a.ec, name: EC tanah plot A, type: SOIL_EC, unit: uS/cm, metadata: { modbusAddress: "1" } }
+          - { code: SOIL-A-PH, metric-key: soil_a.ph, name: pH tanah plot A, type: SOIL_PH, unit: pH, metadata: { modbusAddress: "1" } }
+          - { code: SOIL-A-N, metric-key: soil_a.nitrogen, name: N tanah plot A, type: SOIL_NITROGEN, unit: mg/kg, metadata: { modbusAddress: "1" } }
+          - { code: SOIL-A-P, metric-key: soil_a.phosphorus, name: P tanah plot A, type: SOIL_PHOSPHORUS, unit: mg/kg, metadata: { modbusAddress: "1" } }
+          - { code: SOIL-A-K, metric-key: soil_a.potassium, name: K tanah plot A, type: SOIL_POTASSIUM, unit: mg/kg, metadata: { modbusAddress: "1" } }
+          # Soil 7-in-1, plot B (address 2).
+          - { code: SOIL-B-MOISTURE, metric-key: soil_b.moisture, name: Kelembapan tanah plot B, type: SOIL_MOISTURE, unit: "%", metadata: { modbusAddress: "2" } }
+          - { code: SOIL-B-TEMP, metric-key: soil_b.temperature, name: Suhu tanah plot B, type: SOIL_TEMPERATURE, unit: C, metadata: { modbusAddress: "2" } }
+          - { code: SOIL-B-EC, metric-key: soil_b.ec, name: EC tanah plot B, type: SOIL_EC, unit: uS/cm, metadata: { modbusAddress: "2" } }
+          - { code: SOIL-B-PH, metric-key: soil_b.ph, name: pH tanah plot B, type: SOIL_PH, unit: pH, metadata: { modbusAddress: "2" } }
+          - { code: SOIL-B-N, metric-key: soil_b.nitrogen, name: N tanah plot B, type: SOIL_NITROGEN, unit: mg/kg, metadata: { modbusAddress: "2" } }
+          - { code: SOIL-B-P, metric-key: soil_b.phosphorus, name: P tanah plot B, type: SOIL_PHOSPHORUS, unit: mg/kg, metadata: { modbusAddress: "2" } }
+          - { code: SOIL-B-K, metric-key: soil_b.potassium, name: K tanah plot B, type: SOIL_POTASSIUM, unit: mg/kg, metadata: { modbusAddress: "2" } }
+          # Air (address 3) and light (address 4).
+          - { code: AIR-TEMP, metric-key: air.temperature, name: Suhu udara greenhouse, type: AIR_TEMPERATURE, unit: C, metadata: { modbusAddress: "3", model: SHT20 } }
+          - { code: AIR-HUMIDITY, metric-key: air.humidity, name: Kelembapan udara greenhouse, type: AIR_HUMIDITY, unit: "%RH", metadata: { modbusAddress: "3", model: SHT20 } }
+          - code: LIGHT
+            metric-key: light.illuminance
+            name: Intensitas cahaya
+            type: ILLUMINANCE
+            unit: lux
+            description: RAB masih mencantumkan BH1750 (I2C); bus membutuhkan versi RS485 (§15.7).
+            metadata:
+              modbusAddress: "4"
+
+      # ---------------------------------------------------------------------------------------------
+      - code: RIO-TANK-01
+        name: Remote I/O tangki fertigasi
+        type: MODBUS_IO
+        description: Kotak IP65 di tangki mixing - relay 8-ch alamat 21 + analog in 8-ch alamat 10.
+        metadata:
+          bus: RS485 /dev/rs485 9600 8N1
+          modbusAddress: "10, 21"
+        sensors:
+          - { code: TANK-EC, metric-key: tank.ec, name: EC flow cell, type: SOLUTION_EC, unit: mS/cm, metadata: { modbusAddress: "10", channel: AI0 } }
+          - { code: TANK-PH, metric-key: tank.ph, name: pH flow cell, type: SOLUTION_PH, unit: pH, metadata: { modbusAddress: "10", channel: AI1 } }
+          - { code: FLOAT-SUPPLY, metric-key: tank.supply_float, name: Float gentong, type: LEVEL_SWITCH, metadata: { modbusAddress: "10", channel: AI2 } }
+          - { code: FLOAT-MIXING, metric-key: tank.mixing_float, name: Float tangki mixing, type: LEVEL_SWITCH, metadata: { modbusAddress: "10", channel: AI3 } }
+        actuators:
+          - { code: DOSING-N, name: Pompa dosing N, type: DOSING_PUMP, description: "Debit dikalibrasi pada bus 27,2 V.", metadata: { modbusAddress: "21", channel: R0 } }
+          - { code: DOSING-P, name: Pompa dosing P, type: DOSING_PUMP, description: "Debit dikalibrasi pada bus 27,2 V.", metadata: { modbusAddress: "21", channel: R1 } }
+          - { code: DOSING-K, name: Pompa dosing K, type: DOSING_PUMP, description: "Debit dikalibrasi pada bus 27,2 V.", metadata: { modbusAddress: "21", channel: R2 } }
+          - { code: FILL-VALVE, name: Solenoid pengisian 24 V, type: FILL_VALVE, metadata: { modbusAddress: "21", channel: R3 } }
+          - { code: SAMPLING-PUMP, name: Pompa sampling flow cell, type: SAMPLING_PUMP, metadata: { modbusAddress: "21", channel: R4 } }
+
+  power:
+    # Values the edge agent reports in the status message's powerSource field. Anything else counts as
+    # backup power - including UNKNOWN, which is what "PZEM tidak menjawab" should map to.
+    normal-sources: [MAINS]
+
+  actuator:
+    safety:
+      # Quoted on purpose: unquoted ON is the boolean true in YAML 1.1 and would bind as "TRUE".
+      activating-commands: ["ON"]
+      duration-parameter: durationSeconds
+      # §11.2: relays are commanded in timed-on mode so an output stops even if the Jetson hangs.
+      # Per-actuator ceilings live in max-run-seconds above (or PATCH /api/actuators/{id}) once pump
+      # flow and fill times are calibrated.
+      timed-types: [DISTRIBUTION_PUMP, TROLLEY_MOTOR, DOSING_PUMP, FILL_VALVE, SAMPLING_PUMP]
+      # §6 "PZEM lapor padam": stop dosing (flow follows battery voltage) and the trolley.
+      blocked-on-backup-power-types: [DOSING_PUMP, SAMPLING_PUMP, TROLLEY_MOTOR]
+      # §6 power budget: do not dose while the trolley moves or the LED is on for a capture.
+      exclusive-type-groups:
+        - [DOSING_PUMP, TROLLEY_MOTOR]
+        - [DOSING_PUMP, ILLUMINATION]
+      active-states: ["ON"]

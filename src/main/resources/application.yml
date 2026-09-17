@@ -1,0 +1,148 @@
+# Default configuration. Safe for production: every secret comes from the environment and has no
+# fallback, so the application fails fast rather than starting with a shipped default.
+spring:
+  application:
+    name: smartmelon-backend
+
+  # Local convenience: a .env file in the project root is imported when present. It is gitignored.
+  # The hardware catalog describes the devices, sensors, actuators and interlocks of one hardware
+  # revision. Point HARDWARE_CATALOG_LOCATION (an environment variable, not a .env entry) at another
+  # file to run different hardware without a code change.
+  config:
+    import:
+      - "optional:file:./.env[.properties]"
+      - "optional:${HARDWARE_CATALOG_LOCATION:classpath:hardware/fertimata-rev-a.yml}"
+
+  datasource:
+    # DATABASE_* is the documented name. SPRING_DATASOURCE_* also works and wins if both are set,
+    # because Spring binds it to the same property at a higher precedence.
+    url: ${DATABASE_URL:jdbc:postgresql://localhost:5432/smartmelon}
+    username: ${DATABASE_USERNAME:smartmelon}
+    password: ${DATABASE_PASSWORD:}
+    hikari:
+      maximum-pool-size: ${DATABASE_POOL_SIZE:10}
+
+  jpa:
+    open-in-view: false
+    hibernate:
+      # The schema belongs to Flyway. Hibernate only verifies that it matches the entities.
+      ddl-auto: validate
+    properties:
+      hibernate:
+        jdbc:
+          time_zone: UTC
+        format_sql: false
+
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+
+  jackson:
+    # Nulls are serialised explicitly. A field that is absent and a field that is null look the
+    # same to a client otherwise, and several fields are meaningfully null - an actuator with no
+    # reported state yet, a command that has not been executed. ApiError opts out separately so an
+    # empty validation-details map is not rendered.
+    default-property-inclusion: always
+
+server:
+  port: ${SERVER_PORT:8080}
+  error:
+    # Errors are rendered by GlobalExceptionHandler; never leak a stack trace to a client.
+    include-stacktrace: never
+    include-message: never
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+  endpoint:
+    health:
+      show-details: never
+
+springdoc:
+  swagger-ui:
+    path: /swagger-ui.html
+    operations-sorter: alpha
+    tags-sorter: alpha
+
+app:
+  # DEVELOPMENT wires the mock transport and the simulator. Never set it in a deployed environment.
+  mode: ${APP_MODE:PRODUCTION}
+
+  bootstrap:
+    enabled: ${BOOTSTRAP_ENABLED:true}
+    operator-username: ${BOOTSTRAP_OPERATOR_USERNAME:}
+    operator-password: ${BOOTSTRAP_OPERATOR_PASSWORD:}
+    operator-full-name: ${BOOTSTRAP_OPERATOR_FULL_NAME:Operator}
+
+  device:
+    # TODO(hardware): provisional. Set to a small multiple of the real heartbeat interval once the
+    # edge device firmware decides on one.
+    offline-timeout: ${DEVICE_OFFLINE_TIMEOUT_SECONDS:120}s
+    liveness-check-interval: ${DEVICE_LIVENESS_CHECK_INTERVAL_SECONDS:30}s
+    auto-register: ${DEVICE_AUTO_REGISTER:true}
+
+  catalog:
+    # Create-only sync of the imported hardware catalog at startup. Existing rows are never modified.
+    enabled: ${HARDWARE_CATALOG_SYNC:true}
+
+  actuator:
+    safety:
+      # Interlock lists (timed-types, blocked-on-backup-power-types, exclusive-type-groups) come from
+      # the hardware catalog file. These two are deployment choices rather than hardware facts.
+      refuse-when-device-offline: ${ACTUATOR_REFUSE_WHEN_DEVICE_OFFLINE:false}
+      # Wire expiry for commands; the edge agent discards anything older. Unset means no expiry field.
+      command-ttl: ${ACTUATOR_COMMAND_TTL:}
+
+  telemetry:
+    auto-register-sensors: ${TELEMETRY_AUTO_REGISTER_SENSORS:true}
+    max-clock-skew: ${TELEMETRY_MAX_CLOCK_SKEW_SECONDS:300}s
+    max-metrics-per-message: ${TELEMETRY_MAX_METRICS_PER_MESSAGE:64}
+
+  security:
+    jwt:
+      # No default on purpose: a shipped signing secret is the same as no authentication.
+      secret: ${JWT_SECRET}
+      issuer: ${JWT_ISSUER:smartmelon-backend}
+      access-token-ttl: ${JWT_ACCESS_TOKEN_TTL_MINUTES:60}m
+    cors:
+      allowed-origins: ${FRONTEND_URL:http://localhost:3000}
+      allowed-methods: GET,POST,PUT,PATCH,DELETE,OPTIONS
+      allowed-headers: "*"
+      allow-credentials: true
+      max-age: 1h
+
+  websocket:
+    endpoint: ${WEBSOCKET_ENDPOINT:/ws}
+    allowed-origins: ${WEBSOCKET_ALLOWED_ORIGINS:${FRONTEND_URL:http://localhost:3000}}
+    require-authentication: ${WEBSOCKET_REQUIRE_AUTHENTICATION:true}
+
+  mqtt:
+    enabled: ${MQTT_ENABLED:true}
+    broker-url: ${MQTT_BROKER_URL:tcp://localhost:1883}
+    client-id: ${MQTT_CLIENT_ID:smartmelon-backend}
+    username: ${MQTT_USERNAME:}
+    password: ${MQTT_PASSWORD:}
+    qos: ${MQTT_QOS:1}
+    keep-alive: 60s
+    connection-timeout: 30s
+    completion-timeout: 30s
+    clean-start: false
+    automatic-reconnect: true
+    # PROVISIONAL topic convention. The naming is not locked with the hardware team; every topic in
+    # the system is built from these templates, so changing them here changes them everywhere.
+    # {deviceId} is replaced with the device code.
+    topics:
+      telemetry: ${MQTT_TOPIC_TELEMETRY:smartmelon/{deviceId}/telemetry}
+      status: ${MQTT_TOPIC_STATUS:smartmelon/{deviceId}/status}
+      command: ${MQTT_TOPIC_COMMAND:smartmelon/{deviceId}/command}
+      command-ack: ${MQTT_TOPIC_COMMAND_ACK:smartmelon/{deviceId}/command/ack}
+      ai: ${MQTT_TOPIC_AI:smartmelon/{deviceId}/ai}
+      alert: ${MQTT_TOPIC_ALERT:smartmelon/{deviceId}/alert}
+
+logging:
+  level:
+    root: INFO
+    com.smartmelon.backend: ${LOG_LEVEL_APP:INFO}
+    org.springframework.integration.mqtt: ${LOG_LEVEL_MQTT:INFO}
